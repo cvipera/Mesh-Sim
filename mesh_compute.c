@@ -46,19 +46,20 @@ mesh_node* init_mesh_node (mesh_node* node, int id) {
     node->node_type = MESH_ROUTERS_COUNT > id ? ROUTER : END_DEVICE; // First N nodes are routers
     node->x = random() % (int)MESH_SIZE_X;
     node->y = random() % (int)MESH_SIZE_Y;
-    node->output_link = malloc(sizeof(mesh_link*));
-    node->input_links = (mesh_link**)malloc(sizeof(mesh_link*) * MESH_MAX_LINKS_PER_NODE);
+    node->output_link = (mesh_link){0}; // No output links initially
+    node->input_links = (mesh_link*){0}; // No input links initially
     return node;
 }
 
-mesh_link* init_mesh_link(mesh_link* link, int id, mesh_node* source, mesh_node* destination) {
+mesh_node init_mesh_link(mesh_link* link, int id, mesh_node* source, mesh_node* destination) {
     link->id = id;
-    link->bandwidth = MESH_DEFAULT_BANDWIDTH;
-    link->latency = MESH_DEFAULT_LATENCY;
-    link->source = source;
+    link->length = sqrt(pow(source->x - destination->x, 2) + pow(source->y - destination->y, 2));
+    link->bandwidth = MESH_DEFAULT_BANDWIDTH; // Decrease bandwidth with length
+    link->latency = ( link->length * 10);
+    link->source = *source;
     link->destination = destination;
     destination->input_links[++destination->input_link_count] = link;
-    source->output_link = link;
+    source->output_link = *link;
     source->node_status = CONNECTED;
     return link;
 }
@@ -122,6 +123,7 @@ void mesh_debug_print_node(mesh_node* node) {
 
 void mesh_debug_print_link(mesh_link* link) {
     printf("Link ID: %d                ", link->id);
+    printf("Length: %.2f meters        ", link->length);
     printf("Source Node ID: %d         ", link->source->id);
     printf("Destination Node ID: %d    ", link->destination->id);
     printf("Bandwidth: %.2f Mbps       ", link->bandwidth);

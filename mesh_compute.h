@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "mesh_settings.h"
 
 
@@ -50,8 +51,8 @@ struct mesh_node{
     float x, y;                   /// Coordinates of the node in 2D space
     status node_status;                  /// Status of the node (e.g., ACTIVE, INACTIVE)
     type node_type;               /// Type of the node (e.g., ROUTER, END_DEVICE)
-    mesh_link* output_link;       /// Output link connected to this node
-    mesh_link** input_links;      /// Array of input links (up to 8)
+    mesh_link output_link[2];       /// Output link connected to this node
+    mesh_link* input_links[8];      /// Array of input links (up to 8)
 };
 
 
@@ -59,6 +60,7 @@ struct mesh_link{
     int id;                      /// Unique identifier for the mesh link
     float bandwidth;             /// Bandwidth of the link in Mbps
     float latency;               /// Latency of the link in ms
+    float length;                /// Length of the link in meters
     mesh_node* source;           /// Source node of the link
     mesh_node* destination;      /// Destination node of the link
 };
@@ -83,7 +85,7 @@ mesh* init_mesh(const char* name);
 void free_mesh(mesh* m);
 
 mesh_node* init_mesh_node(mesh_node* m,int id);
-mesh_link* init_mesh_link(mesh_link* m,int id, mesh_node* source, mesh_node* destination);
+mesh_link init_mesh_link(mesh_link* m,int id, mesh_node* source, mesh_node* destination);
 mesh_path* init_mesh_path(mesh_path* m, int id, int start_id, int end_id);
 
 ///@brief Computes the mesh network based on the provided nodes.
