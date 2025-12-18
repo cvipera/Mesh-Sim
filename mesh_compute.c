@@ -11,7 +11,6 @@ mesh* init_mesh(const char* name) {
     m->node_count = MESH_NODES_COUNT;
     m->nodes = (mesh_node*)malloc(sizeof(mesh_node) * m->node_count);
     m->link_count = 0;
-    m->links = NULL;
     m->path_count = 0;
     m->paths = NULL;
     for (int i = 0; i < m->node_count; i++) {
@@ -25,10 +24,6 @@ void free_mesh(mesh* m) {
     if (m->nodes) {
         free(m->nodes);
         m->nodes = NULL;
-    }
-    if (m->links) {
-        free(m->links);
-        m->links = NULL;
     }
     if (m->paths) {
         free(m->paths);
@@ -46,22 +41,49 @@ mesh_node* init_mesh_node (mesh_node* node, int id) {
     node->node_type = MESH_ROUTERS_COUNT > id ? ROUTER : END_DEVICE; // First N nodes are routers
     node->x = random() % (int)MESH_SIZE_X;
     node->y = random() % (int)MESH_SIZE_Y;
-    node->output_link = (mesh_link){0}; // No output links initially
-    node->input_links = (mesh_link*){0}; // No input links initially
+    node->output_link = calloc(2, sizeof(mesh_link)); // No output links initially
+    node->input_links = calloc(8, sizeof(mesh_link*)); // No input links initially
     return node;
 }
 
-mesh_node init_mesh_link(mesh_link* link, int id, mesh_node* source, mesh_node* destination) {
-    link->id = id;
-    link->length = sqrt(pow(source->x - destination->x, 2) + pow(source->y - destination->y, 2));
-    link->bandwidth = MESH_DEFAULT_BANDWIDTH; // Decrease bandwidth with length
-    link->latency = ( link->length * 10);
-    link->source = *source;
-    link->destination = destination;
-    destination->input_links[++destination->input_link_count] = link;
-    source->output_link = *link;
+bool mesh_link_allowed(mesh_node* source, mesh_node* destination) {
+    float distance = sqrt(pow(source->x - destination->x, 2) + pow(source->y - destination->y, 2));
+    if (source->id == destination->id) {
+        return false; // No self-links
+    }
+    if(distance > MESH_MAX_LINK_DISTANCE) {
+        return false; // Exceeds max link distance
+    }
+    if(source->output_link_count >= 2) {
+        return false; // Source has max output links
+    }
+    if(destination->input_link_count >= 8) {
+        return false; // Destination has max input links
+    }
+    return true;
+}
+
+
+
+int init_mesh_link(int id, mesh_node* source, mesh_node* destination) {
+    mesh_link link = source->output_link[source->output_link_count];
+    link.id = id;
+    link.bandwidth = MESH_DEFAULT_BANDWIDTH; // Decrease bandwidth with length
+    link.length = sqrt(pow(source->x - destination->x, 2) + pow(source->y - destination->y, 2));
+    link.latency = ( link.length * 10);   
+    link.source = source;
+    link.destination = destination;
+
+    if (source->output_link_count < 1) {
+        source->output_link_count++;
+        source->output_link[0] = link;
+    }else {
+        source->output_link_count++;
+        source->output_link[1] = link;
+    }
     source->node_status = CONNECTED;
-    return link;
+    destination->input_links[++destination->input_link_count] = &link;
+    return source->output_link_count;
 }
 
 mesh_path* init_mesh_path(mesh_path* path,int id, int start_node_id, int end_node_id) {
@@ -89,9 +111,16 @@ int MESH_SAVEDUMP(mesh* m, enum data d) {
 
     if (d == LINKS || d == ALL) {
         fprintf(file, "LinkID,SourceID,DestinationID,Bandwidth,Latency\n");
-        for (int i = 0; i < m->link_count; i++) {
-            mesh_link* link = &m->links[i];
-            fprintf(file, "%d,%d,%d,%.2f,%.2f\n", link->id, link->source->id, link->destination->id, link->bandwidth, link->latency);
+        for (int i = 0; i < m->node_count; i++) {
+            if (m->nodes[i].output_link_count == 0) continue;
+            if (m->nodes[i].output_link_count >= 1) {
+                mesh_link* link = &m->nodes[i].output_link[0];
+                fprintf(file, "%d,%d,%d,%.2f,%.2f\n", link->id, link->source->id, link->destination->id, link->bandwidth, link->latency);
+            }
+            if (m->nodes[i].output_link_count == 2) {
+                mesh_link* link = &m->nodes[i].output_link[1];
+                fprintf(file, "%d,%d,%d,%.2f,%.2f\n", link->id, link->source->id, link->destination->id, link->bandwidth, link->latency);
+            }
         }
     }
 
@@ -106,7 +135,6 @@ int MESH_SAVEDUMP(mesh* m, enum data d) {
     fclose(file);
     return 0; // Success
 }
-
 
 void mesh_debug_print_node(mesh_node* node) {
     printf("Node ID: %d                  ", node->id);
@@ -123,11 +151,11 @@ void mesh_debug_print_node(mesh_node* node) {
 
 void mesh_debug_print_link(mesh_link* link) {
     printf("Link ID: %d                ", link->id);
+    printf("Bandwidth: %.2f Mbps       ", link->bandwidth);
+    printf("Latency: %.2f ms           ", link->latency);
     printf("Length: %.2f meters        ", link->length);
     printf("Source Node ID: %d         ", link->source->id);
-    printf("Destination Node ID: %d    ", link->destination->id);
-    printf("Bandwidth: %.2f Mbps       ", link->bandwidth);
-    printf("Latency: %.2f ms           \n", link->latency);
+    printf("Destination Node ID: %d    \n", link->destination->id);
 }
 
 void mesh_debug_print_path(mesh_path* path) {
@@ -151,8 +179,14 @@ void mesh_debug_print_mesh(mesh* m) {
         mesh_debug_print_node(&m->nodes[i]);
     }
     printf("\nLinks:\n");
-    for (int i = 0; i < m->link_count; i++) {
-        mesh_debug_print_link(&m->links[i]);
+    for (int i = 0; i < m->node_count; i++) {
+        if (m->nodes[i].output_link_count == 0) continue;
+        if (m->nodes[i].output_link_count >= 1) {
+            mesh_debug_print_link(&m->nodes[i].output_link[0]);
+        }
+        if (m->nodes[i].output_link_count == 2) {
+            mesh_debug_print_link(&m->nodes[i].output_link[1]);
+        }
     }
     printf("\nPaths:\n");
     for (int i = 0; i < m->path_count; i++) {
